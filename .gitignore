@@ -1,0 +1,15 @@
+# Ignore unwanted files
+.DS_Store
+
+# Ignore Visual Studio Code settings
+.vscode/
+
+# Ignore build artifacts
+build/
+CMakeUserPresets.json
+
+# Ignore Visual Studio files
+.vs/
+
+# Ignore Git configuration file
+.gitconfig

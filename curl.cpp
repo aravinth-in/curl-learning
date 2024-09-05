@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <iostream>
+#include <memory>
 #include <string>
 
 // This function is called by libcurl as soon as there is data received that needs to be saved.
@@ -45,49 +46,43 @@ int ProgressCallback(void* clientp, curl_off_t dltotal, curl_off_t dlnow, curl_o
 class CurlDownloader
 {
    public:
-    CurlDownloader()
+    CurlDownloader() : curl(curl_easy_init(), curl_easy_cleanup)
     {
-        // Initializes a CURL easy session and returns a handle to be used in subsequent libcurl
-        // function calls.
-        curl = curl_easy_init();
-    }
-
-    ~CurlDownloader()
-    {
-        // Clean up
-        if (curl) {
-            curl_easy_cleanup(curl);
+        if (!curl)
+        {
+            throw std::runtime_error("Failed to initialize CURL");
         }
     }
 
-    std::string download(const CurlDownloader &curlDownloader, const std::string &url, const FILE* filePointer)
+    ~CurlDownloader() = default;
+
+    std::string download(const std::string& url, const FILE* filePointer)
     {
-        if (!curlDownloader.curl)
+        if (!curl)
         {
             return "Failed to initialize curl";
         }
 
         // Set the URL for the GET request
-        curl_easy_setopt(curlDownloader.curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
 
         // Set the callback function to handle the response data
-        curl_easy_setopt(curlDownloader.curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+        curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, WriteCallback);
 
         // Pass the string to the callback function
         // curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
-        curl_easy_setopt(curlDownloader.curl, CURLOPT_WRITEDATA, filePointer);
+        curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, filePointer);
 
         // Set the progress callback function
-        curl_easy_setopt(curlDownloader.curl, CURLOPT_XFERINFOFUNCTION, ProgressCallback);
-        curl_easy_setopt(curlDownloader.curl, CURLOPT_NOPROGRESS, 0L);  // Enable progress meter
+        curl_easy_setopt(curl.get(), CURLOPT_XFERINFOFUNCTION, ProgressCallback);
+        curl_easy_setopt(curl.get(), CURLOPT_NOPROGRESS, 0L);  // Enable progress meter
 
         // Set additional options (optional)
-        curl_easy_setopt(curlDownloader.curl, CURLOPT_FOLLOWLOCATION, 1L);  // Follow redirects
-        curl_easy_setopt(curlDownloader.curl, CURLOPT_TIMEOUT,
-                         10L);  // Timeout after 10 seconds
+        curl_easy_setopt(curl.get(), CURLOPT_FOLLOWLOCATION, 1L);  // Follow redirects
+        curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT, 10L);  // Timeout after 10 seconds
 
         // Perform the request
-        CURLcode curl_result = curl_easy_perform(curlDownloader.curl);
+        CURLcode curl_result = curl_easy_perform(curl.get());
 
         if (curl_result != CURLE_OK)
         {
@@ -96,57 +91,72 @@ class CurlDownloader
 
         return "SUCCESS";
     }
-    CURL* curl;
+
+   private:
+    std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl;
+};
+
+class Downloader
+{
+   public:
+    Downloader(const std::string& url) : url(url) {}
+
+    ~Downloader() = default;
+
+    const char* getDownloadPath()
+    {
+        const char* homeDir = getenv("HOME");
+        if (!homeDir)
+        {
+            std::cerr << "Failed to get home directory" << std::endl;
+            return nullptr;
+        }
+
+        std::string outputFileNameStr = std::string(homeDir) + "/Downloads/downloaded_data.txt";
+        outputFileName = outputFileNameStr.c_str();
+        return outputFileName;
+    }
+
+    void execute()
+    {
+        FILE* filePointer = fopen(getDownloadPath(), "wb");
+
+        if (!filePointer)
+        {
+            std::cerr << "Failed to open file for writing: " << outputFileName << std::endl;
+            return;
+        }
+
+        CurlDownloader curlDownloader;
+        std::string result = curlDownloader.download(url, filePointer);
+
+        // Check for errors
+        if (result != "SUCCESS")
+        {
+            std::cerr << "Download failed: " << result << std::endl;
+        }
+        else
+        {
+            std::cout << "Download successful, data saved to: " << outputFileName << std::endl;
+        }
+
+        fclose(filePointer);
+    }
+
+    std::string url;
+    const char* outputFileName;
 };
 
 int main()
 {
-    // CURLcode res;
-    FILE* filePointer;
-    // std::string readBuffer;
-
-    const char* homeDir = getenv("HOME");
-    if (!homeDir)
-    {
-        std::cerr << "Failed to get home directory" << std::endl;
-        return 1;
-    }
-
-    std::string outputFileNameStr = std::string(homeDir) + "/Downloads/downloaded_data.txt";
-    const char* outputFileName = outputFileNameStr.c_str();
-
     // Initializes the libcurl library globally. This is typically done at the beginning of a
     // program that uses libcurl to ensure that all required resources are set up.
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
     {
-        CurlDownloader curlDownloader;
-
-        filePointer = fopen(outputFileName, "wb");
-        if (!filePointer)
-        {
-            std::cerr << "Failed to open file for writing: " << outputFileName << std::endl;
-            return 1;
-        }
-
-        std::string url =
-            "http://movie.basnetbd.com/Data/TV%20Series/12%20Monkeys/Season%2001/"
-            "S01E04%20-%20Atari.eng.srt";
-        std::string result = curlDownloader.download(curlDownloader, url, filePointer);
-
-        // Check for errors
-        if (result != "SUCCESS")
-        {
-            std::cerr << "download failed: " << result << std::endl;
-        }
-        else
-        {
-            // Print the response
-            // std::cout << "Response data: " << readBuffer << std::endl;
-            std::cout << "Download successful, data saved to: " << outputFileName << std::endl;
-        }
-
-        fclose(filePointer);
+        std::string url = "https://en.wikipedia.org/wiki/CURL";
+        Downloader downloader(url);
+        downloader.execute();
     }
 
     // Global cleanup

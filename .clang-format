@@ -13,3 +13,4 @@ Cpp11BracedListStyle: true
 DerivePointerAlignment: false
 PointerAlignment: Left
 IndentCaseLabels: true
+AlignTrailingComments: false
